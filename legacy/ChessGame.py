@@ -1,6 +1,11 @@
 from time import sleep
 import random
 from typing import Optional
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 
 import chess
 from chessboard import display
@@ -90,22 +95,34 @@ class ChessBoard:
         self.board_display = display.start(self.board.fen())
         temp_board = chess.Board()
         for move in self.board.move_stack:
-            temp_board.push_san(str(move))
+            temp_board.push_uci(str(move))
             self.board_display.update_pieces(temp_board.fen())
-            sleep(1)
 
     def reset(self):
         self.board.reset()
         return get_position_as_array(self.board.fen())
 
     def step(self, action: str):
-        self.board.push_san(action)
+        move_is_legal = True
+        reward = 0
         if self.board.is_checkmate():
-            print("CHECKMATE")
-            return 1
-        return None
+            print("ChessNet has lost by checkmate")
+            reward += -10_000
+            return None, reward, True
+        try:
+            self.board.push_uci(action)
+            reward += 1
+        except ValueError:
+            reward += -100
+            move_is_legal = False
 
-    def request_move(self):
+        is_checkmate = self.board.is_checkmate()
+        if is_checkmate:
+            reward += 10_000
+        state = self.board.fen
+        return state, reward, is_checkmate, move_is_legal
+
+    def request_move_from_opponent(self):
         self.board.push([i for i in self.board.legal_moves][0])
 
 
@@ -120,41 +137,73 @@ class ChessBot:
         pass
 
     def test_run(self):
-        # TODO: continue here: test the model, so that rando can give a random number between 0 and 4095
         episodes = 10
         for episode in range(1, episodes + 1):
             state = self.env.reset()
             done = False
-            score = 0
+            total_reward = 0
 
             while not done:
                 # env.render()
                 action_number = random.randint(0, self.actions - 1)
                 action = number_to_position(action_number)
-                try:
-                    output = self.env.step(action)
-                    print("Chessbot tries " + action + " successfully")
+                state, reward, done, move_was_legal = self.env.step(action)
+                total_reward += reward
+                if move_was_legal:
+                    print("Chessbot executes " + action)
                     sleep(0.5)
                     self.env.display_game()
-                except ValueError:
-                    # print("Chessbot tries " + action + " unsuccessfully")
+                else:
                     continue
-                if output is not None:
+                if done:
                     print("Checkmate!")
-                    score += 10000
                     break
-                self.env.request_move()
-                # score += reward
-            print('Episode:{} Score:{}'.format(episode, score))
+                self.env.request_move_from_opponent()
+                total_reward += reward
+            print('Episode:{} Score:{}'.format(episode, total_reward))
 
 
-chessBot = ChessBot()
+class ChessNet:
 
-chessBot.test_run()
+    def __init__(self):
+        self.model = self._build_model()
+        self.chess_board = ChessBoard()
+        self.board = self.chess_board.board
+        self.learning_rate = 0.001
 
-# for i in range(4096):
-#     if i % 64 == 0:
-#         print()
-#     print(number_to_position(i), end="")
+    def _build_model(self):
+        # Neural Net for Deep-Q learning Model
+        model = Sequential()
+        model.add(Dense(24, input_dim=fen_to_array(self.board.fen()), activation='relu'))
+        model.add(Dense(24, activation='relu'))
+        model.add(Dense(ChessBoard.N_ALL_MOVES, activation='linear'))
+        model.compile(loss='mse', optimizer=Adam(lr=self.learning_rate))
+        print(model.summary())
+        return model
 
-# print(number_to_position(4095))
+
+def fen_to_array(fen):
+    # Converts FEN notation to a numpy array suitable for input to a neural network
+
+    # Mapping of piece characters to integers
+    piece_to_int = {'p': 1, 'r': 2, 'n': 3, 'b': 4, 'q': 5, 'k': 6,
+                    'P': 7, 'R': 8, 'N': 9, 'B': 10, 'Q': 11, 'K': 12}
+
+    # Initialize an empty board array
+    board_array = np.zeros((8, 8, 12), dtype=np.int8)
+
+    # Split FEN string into its components
+    fen_parts = fen.split(' ')
+
+    # Parse the piece placement part of FEN
+    row_strs = fen_parts[0].split('/')
+    for i, row_str in enumerate(row_strs):
+        j = 0
+        for char in row_str:
+            if char.isdigit():
+                j += int(char)
+            else:
+                board_array[i, j, piece_to_int[char] - 1] = 1
+                j += 1
+
+    return board_array

@@ -1,11 +1,6 @@
 import unittest
-from collections.abc import Set
 
-import ChessGame
-
-
-def add_if_absent(list: [], value: str):
-    list
+from legacy import ChessGame
 
 
 class MyTestCase(unittest.TestCase):
@@ -36,6 +31,10 @@ class MyTestCase(unittest.TestCase):
             all_actual_moves.add(ChessGame.number_to_position(i))
         self.assertEqual(len(all_actual_moves), len(all_expected_moves))
         self.assertEqual(all_actual_moves, all_expected_moves)
+
+    def test_piece_movement(self):
+        chessbot = ChessGame.ChessBot()
+        chessbot.env.step("b1c3")
 
 
 if __name__ == '__main__':
